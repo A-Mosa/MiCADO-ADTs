@@ -1,0 +1,303 @@
+tosca_definitions_version: tosca_simple_yaml_1_0
+
+imports:
+  - https://raw.githubusercontent.com/micado-scale/tosca/v0.7.3/micado_types.yaml
+
+repositories:
+  docker_hub: https://hub.docker.com/
+
+topology_template:
+  node_templates:
+    nfs-server-pod:
+      type: tosca.nodes.MiCADO.Container.Application.Docker
+      properties:
+         name: nfs-server-container
+         securityContext:
+           privileged: True
+         args: ['/exports']
+         ports:
+           - target: 2049
+             clusterIP: 10.96.0.240
+           - target: 111
+             protocol: udp
+      requirements:
+      - host:
+          node: static-worker
+      artifacts:
+       image:
+         type: tosca.artifacts.Deployment.Image.Container.Docker
+         file: itsthenetwork/nfs-server-ubuntu
+         repository: docker_hub
+      interfaces:
+        Kubernetes:
+          create:
+            implementation: image
+            inputs:
+              kind: Deployment
+              strategy:
+                type: Recreate
+              metadata:
+                labels:
+                  volume: 'nfs'
+          configure:
+            inputs:
+              metadata:
+                labels:
+                  tier: nfs
+
+    nextcloud-mysql:
+      type: tosca.nodes.MiCADO.Container.Application.Docker
+      properties:
+         name: mysql
+         env:
+         - name: MYSQL_ROOT_PASSWORD
+           value: admin
+         - name: MYSQL_DATABASE
+           value: nextcloud
+         - name: MYSQL_USER
+           value: nextcloud
+         - name: MYSQL_PASSWORD
+           value: admin 
+         ports:
+         - target: 3306
+           clusterIP: 'None'
+         - containerPort: 3306
+           name: mysql
+      artifacts:
+       image:
+         type: tosca.artifacts.Deployment.Image.Container.Docker
+         file: mysql:5.6
+         repository: docker_hub
+      requirements:
+        - volume:
+            node: nfs-volume
+            relationship:
+              type: tosca.relationships.AttachesTo
+              properties:
+                location: /var/lib/mysql
+        - host:
+            node: static-worker
+
+      interfaces:
+        Kubernetes:
+          create:
+            implementation: image
+            inputs:
+              strategy:
+                type: Recreate
+          configure:
+            inputs:
+              metadata:
+                labels:
+                  tier: mysql
+
+    nfs-volume:
+      type: tosca.nodes.MiCADO.Container.Volume
+      properties:
+        name: nfs-volume
+      interfaces:
+        Kubernetes:
+          create:
+            inputs:
+              nfs:
+                server: 10.96.0.240
+                path: /
+
+    nextcloud:
+      type: tosca.nodes.MiCADO.Container.Application.Docker
+      # Container runtime
+      properties:
+         name: nextcloud
+         env:
+         - name: NEXTCLOUD_ADMIN_USER
+           value: nextcloud
+         - name: NEXTCLOUD_ADMIN_PASSWORD
+           value: admin
+         - name: NEXTCLOUD_UPLOAD_MAX_FILESIZE
+           value: 4G
+         - name: NEXTCLOUD_MAX_FILE_UPLOADS
+           value: "20"
+         - name: NEXTCLOUD_TRUSTED_DOMAINS
+           value: "212.46.102.76"
+         - name: MYSQL_DATABASE
+           value: nextcloud
+         - name: MYSQL_HOST
+           value: nextcloud-mysql
+         - name: MYSQL_USER
+           value: nextcloud
+         - name: MYSQL_PASSWORD
+           value: admin 
+           
+         resources:
+           requests:
+             cpu: "900m"
+         ports:
+         - target: 80
+           nodePort: 30010
+           type: NodePort
+         - containerPort: 80
+           name: nextcloud
+      # Container image
+      artifacts:
+       image:
+         type: tosca.artifacts.Deployment.Image.Container.Docker
+         file: nextcloud
+         repository: docker_hub
+      requirements:
+        - volume:
+            node: nfs-volume
+            relationship:
+              type: tosca.relationships.AttachesTo
+              properties:
+                location: /var/www/html
+        - host:
+            node: scaling-worker
+      # Container orchestrator (K8 Specific )
+      interfaces:
+        Kubernetes:
+          create:
+            implementation: image
+            inputs:
+              strategy:
+                type: Recreate
+          configure:
+            inputs:
+              metadata:
+                labels:
+                  tier: frontend
+
+    scaling-worker:
+      type: tosca.nodes.MiCADO.Nova.Compute
+      properties:
+        image_id: 5975bb54-6971-4482-b498-3c0cc337499a
+        flavor_name: 05333045-6002-4bae-9455-54977f3d75cf
+        project_id: 3b922d11a8344b0e9484cf7d420ff22c
+        network_id: ec83b045-a6aa-4c44-9648-21bc4c002fce
+        key_name: abdo-public-key
+        context:
+          append: yes
+          cloud_config: |
+            runcmd:
+            - apt-get install -y nfs-kernel-server nfs-common
+        security_groups:
+          - 55adea33-49ef-45d8-9943-c65e2c4309de
+      interfaces:
+        Occopus:
+          create:
+            inputs:
+              interface_cloud: nova
+              endpoint_cloud: https://api-dus.hkn.cloud:5000/v3/
+      capabilities:
+        host:
+          properties:
+            num_cpus: 2
+            mem_size: 2 GB
+
+    static-worker:
+      type: tosca.nodes.MiCADO.Nova.Compute
+      properties:
+        image_id: 5975bb54-6971-4482-b498-3c0cc337499a
+        flavor_name: 05333045-6002-4bae-9455-54977f3d75cf
+        project_id: 3b922d11a8344b0e9484cf7d420ff22c
+        network_id: ec83b045-a6aa-4c44-9648-21bc4c002fce
+        key_name: abdo-public-key
+        context:
+          append: yes
+          cloud_config: |
+            runcmd:
+            - apt-get install -y nfs-kernel-server nfs-common
+        security_groups:
+          - 55adea33-49ef-45d8-9943-c65e2c4309de
+      interfaces:
+        Occopus:
+          create:
+            inputs:
+              interface_cloud: nova
+              endpoint_cloud: https://api-dus.hkn.cloud:5000/v3/
+      capabilities:
+        host:
+          properties:
+            num_cpus: 2
+            mem_size: 2 GB
+
+  outputs:
+    ports:
+      value: { get_attribute: [ nextcloud, port ]}
+
+  policies:
+    - scalability:
+        type: tosca.policies.Scaling.MiCADO.VirtualMachine.Net.nextcloud
+        targets: [ scaling-worker ]
+        properties:
+          constants:
+            NODE_NAME: 'scaling-worker'
+          min_instances: 1
+          max_instances: 3
+    - scalability:
+        type: tosca.policies.Scaling.MiCADO.Container.Net.nextcloud
+        targets: [ nextcloud ]
+        properties:
+          constants:
+            SERVICE_NAME: 'nextcloud'
+            SERVICE_FULL_NAME: 'nextcloud'
+            SERVICE_TH_MAX: '60'
+            SERVICE_TH_MIN: '25'
+          min_instances: 1
+          max_instances: 3
+
+policy_types:
+  tosca.policies.Scaling.MiCADO.Container.Net.nextcloud:
+    derived_from: tosca.policies.Scaling.MiCADO
+    description: base MiCADO policy defining data sources, constants, queries, alerts, limits and rules
+    properties:
+      alerts:
+        type: list
+        description: pre-define alerts for container Net
+        default:
+        - alert: service_overloaded
+          expr: 'avg(rate(container_network_receive_bytes_total{container_label_io_kubernetes_pod_name=~"{{SERVICE_FULL_NAME}}-[^-]*-[^-]*"}[60s]))/1000 > {{SERVICE_TH_MAX}}'
+          for: 30s
+        - alert: service_underloaded
+          expr: 'avg(rate(container_network_receive_bytes_total{container_label_io_kubernetes_pod_name=~"{{SERVICE_FULL_NAME}}-[^-]*-[^-]*"}[60s]))/1000 < {{SERVICE_TH_MIN}}'
+          for: 30s
+        required: true
+      scaling_rule:
+        type: string
+        description: pre-define scaling rule for container Net
+        default: |
+          if len(m_nodes) == m_node_count:
+            if service_overloaded and m_node_count > m_container_count:
+              m_container_count+=1
+            if service_underloaded:
+              m_container_count-=1
+          else:
+            print('Transient phase, skipping update of containers...')
+        required: true
+
+  tosca.policies.Scaling.MiCADO.VirtualMachine.Net.nextcloud:
+    derived_from: tosca.policies.Scaling.MiCADO
+    description: base MiCADO policy defining data sources, constants, queries, alerts, limits and rules
+    properties:
+      alerts:
+        type: list
+        description: pre-define alerts for node Net
+        default:
+        - alert: node_overloaded
+          expr: 'avg(rate(container_network_receive_bytes_total{node="{{ NODE_NAME }}", container_label_io_kubernetes_pod_name=~"{{SERVICE_FULL_NAME}}-[^-]*-[^-]*"}[60s]))/1000 > {{SERVICE_TH_MAX}}'
+          for: 1m
+        - alert: node_underloaded
+          expr: 'avg(rate(container_network_receive_bytes_total{node="{{ NODE_NAME }}", container_label_io_kubernetes_pod_name=~"{{SERVICE_FULL_NAME}}-[^-]*-[^-]*"}[60s]))/1000 < {{SERVICE_TH_MIN}}'
+          for: 1m
+        required: true
+      scaling_rule:
+        type: string
+        description: pre-define scaling rule for VM Net
+        default: |
+          if len(m_nodes) <= m_node_count and 0 < m_time_since_node_count_changed > 180:
+            if node_overloaded:
+              m_node_count+=1
+            elif node_underloaded:
+              m_node_count-=1
+          else:
+            print('Transient phase, skipping update of nodes...')
+        required: true
