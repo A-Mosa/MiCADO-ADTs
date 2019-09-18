@@ -1,14 +1,13 @@
 tosca_definitions_version: tosca_simple_yaml_1_0
 
 imports:
-  - https://raw.githubusercontent.com/micado-scale/tosca/v0.7.3/micado_types.yaml
+  - https://raw.githubusercontent.com/micado-scale/tosca/develop/micado_types.yaml
 
 repositories:
   docker_hub: https://hub.docker.com/
 
 topology_template:
   node_templates:
-    node_templates:
     db-pvc:
       type: tosca.nodes.MiCADO.Container.Volume
       properties:
