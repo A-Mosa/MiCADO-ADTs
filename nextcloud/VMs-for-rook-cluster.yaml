@@ -1,0 +1,41 @@
+tosca_definitions_version: tosca_simple_yaml_1_0
+
+imports:
+  - https://raw.githubusercontent.com/micado-scale/tosca/develop/micado_types.yaml
+
+repositories:
+  docker_hub: https://hub.docker.com/
+
+topology_template:
+  node_templates:
+    rook-vm:
+      type: tosca.nodes.MiCADO.Nova.Compute
+      properties:
+        image_id: 5975bb54-6971-4482-b498-3c0cc337499a
+        flavor_name: 05333045-6002-4bae-9455-54977f3d75cf
+        project_id: 3b922d11a8344b0e9484cf7d420ff22c
+        network_id: ec83b045-a6aa-4c44-9648-21bc4c002fce
+        key_name: abdo-public-key
+        context:
+          append: yes
+          cloud_config: |
+            runcmd:
+            - apt-get install -y nfs-kernel-server nfs-common
+            - cp nginx.conf /etc/nginx/
+        security_groups:
+          - 55adea33-49ef-45d8-9943-c65e2c4309de
+      interfaces:
+        Occopus:
+          create:
+            inputs:
+              interface_cloud: nova
+              endpoint_cloud: https://api-dus.hkn.cloud:5000/v3/
+      capabilities:
+        scalable:
+          properties:
+            min_instances: 3
+            max_instances: 4
+        host:
+          properties:
+            num_cpus: 2
+            mem_size: 2 GB
