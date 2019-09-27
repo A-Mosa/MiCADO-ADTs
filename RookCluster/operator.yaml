@@ -122,7 +122,6 @@ spec:
         effect: NoSchedule
       nodeSelector:
         node-role.kubernetes.io/master: ''
-      containers
       containers:
       - name: rook-operator
         image: rook/rook:v0.7.1
