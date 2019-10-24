@@ -1,0 +1,2 @@
+nextcloud/nextcloud-fpm-mysql-rook-block.yaml
+nextcloud/nextcloud-mysql-rook-block-ingress.yaml
